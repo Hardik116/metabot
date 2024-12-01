@@ -1,22 +1,3 @@
-/**
- * Copyright 2021-present, Facebook, Inc. All rights reserved.
- *
- * This source code is licensed under the license found in the
- * LICENSE file in the root directory of this source tree.
- *
- * Messenger Platform Quick Start Tutorial
- *
- * This is the completed code for the Messenger Platform quick start tutorial
- *
- * https://developers.facebook.com/docs/messenger-platform/getting-started/quick-start/
- *
- * To run this code, you must do the following:
- *
- * 1. Deploy this code to a server running Node.js
- * 2. Run `yarn install`
- * 3. Add your VERIFY_TOKEN and PAGE_ACCESS_TOKEN to your environment vars
- */
-
 'use strict';
 
 // Use dotenv to read .env vars into Node
@@ -28,12 +9,11 @@ console.log('PORT:', process.env.PORT);
 console.log('VERIFY_TOKEN:', process.env.VERIFY_TOKEN ? 'Set' : 'Not Set');
 console.log('PAGE_ACCESS_TOKEN:', process.env.PAGE_ACCESS_TOKEN ? 'Set' : 'Not Set');
 
-// Imports dependencies and set up http server
-const
-  request = require('request'),
-  express = require('express'),
-  { urlencoded, json } = require('body-parser'),
-  app = express();
+// Imports dependencies and sets up http server
+const request = require('request');
+const express = require('express');
+const { urlencoded, json } = require('body-parser');
+const app = express();
 
 // Parse application/x-www-form-urlencoded
 app.use(urlencoded({ extended: true }));
@@ -48,8 +28,6 @@ app.get('/', function (_req, res) {
 
 // Adds support for GET requests to our webhook
 app.get('/webhook', (req, res) => {
-
-  // Your verify token. Should be a random string.
   const VERIFY_TOKEN = process.env.VERIFY_TOKEN;
 
   // Parse the query params
@@ -57,29 +35,21 @@ app.get('/webhook', (req, res) => {
   let token = req.query['hub.verify_token'];
   let challenge = req.query['hub.challenge'];
 
-  // Checks if a token and mode is in the query string of the request
   if (mode && token) {
-
-    // Checks the mode and token sent is correct
     if (mode === 'subscribe' && token === VERIFY_TOKEN) {
-
-      // Responds with the challenge token from the request
       console.log('WEBHOOK_VERIFIED');
       res.status(200).send(challenge);
-
     } else {
-      // Responds with '403 Forbidden' if verify tokens do not match
       res.sendStatus(403);
     }
   }
 });
 
-// Creates the endpoint for your webhook
+// Creates the endpoint for your webhook to receive messages from Instagram
 app.post('/webhook', (req, res) => {
   let body = req.body;
 
-  // Checks if this is an event from a page subscription
-  if (body.object === 'page') {
+  if (body.object === 'instagram') {
 
     // Iterates over each entry - there may be multiple if batched
     body.entry.forEach(function(entry) {
@@ -88,12 +58,11 @@ app.post('/webhook', (req, res) => {
       let webhookEvent = entry.messaging[0];
       console.log(webhookEvent);
 
-      // Get the sender PSID
+      // Get the sender ID (PSID or Instagram ID)
       let senderPsid = webhookEvent.sender.id;
       console.log('Sender PSID: ' + senderPsid);
 
-      // Check if the event is a message or postback and
-      // pass the event to the appropriate handler function
+      // Handle the received message
       if (webhookEvent.message) {
         handleMessage(senderPsid, webhookEvent.message);
       } else if (webhookEvent.postback) {
@@ -101,29 +70,25 @@ app.post('/webhook', (req, res) => {
       }
     });
 
-    // Returns a '200 OK' response to all requests
+    // Returns a '200 OK' response to acknowledge receipt of the event
     res.status(200).send('EVENT_RECEIVED');
   } else {
-
-    // Returns a '404 Not Found' if event is not from a page subscription
+    // Returns a '404 Not Found' if the event is not from an Instagram subscription
     res.sendStatus(404);
   }
 });
 
-// Handles messages events
+// Handles message events from Instagram
 function handleMessage(senderPsid, receivedMessage) {
   let response;
 
-  // Checks if the message contains text
+  // Check if the message contains text
   if (receivedMessage.text) {
-    // Create the payload for a basic text message, which
-    // will be added to the body of your request to the Send API
     response = {
       'text': `You sent the message: '${receivedMessage.text}'. Now send me an attachment!`
     };
   } else if (receivedMessage.attachments) {
-
-    // Get the URL of the message attachment
+    // Get the URL of the message attachment (image/video)
     let attachmentUrl = receivedMessage.attachments[0].payload.url;
     response = {
       'attachment': {
@@ -152,31 +117,29 @@ function handleMessage(senderPsid, receivedMessage) {
     };
   }
 
-  // Send the response message
+  // Send the response message to Instagram via the API
   callSendAPI(senderPsid, response);
 }
 
-// Handles messaging_postbacks events
+// Handles postback events
 function handlePostback(senderPsid, receivedPostback) {
   let response;
 
   // Get the payload for the postback
   let payload = receivedPostback.payload;
 
-  // Set the response based on the postback payload
   if (payload === 'yes') {
     response = { 'text': 'Thanks!' };
   } else if (payload === 'no') {
     response = { 'text': 'Oops, try sending another image.' };
   }
-  // Send the message to acknowledge the postback
+
+  // Send the postback response
   callSendAPI(senderPsid, response);
 }
 
-// Sends response messages via the Send API
+// Sends the response to Instagram via the Send API
 function callSendAPI(senderPsid, response) {
-
-  // The page access token we have generated in your app settings
   const PAGE_ACCESS_TOKEN = process.env.PAGE_ACCESS_TOKEN;
 
   // Construct the message body
@@ -187,9 +150,9 @@ function callSendAPI(senderPsid, response) {
     'message': response
   };
 
-  // Send the HTTP request to the Messenger Platform
+  // Send the request to Instagram's Send API
   request({
-    'uri': 'https://graph.facebook.com/v2.6/me/messages',
+    'uri': 'https://graph.facebook.com/v12.0/me/messages',
     'qs': { 'access_token': PAGE_ACCESS_TOKEN },
     'method': 'POST',
     'json': requestBody
@@ -202,7 +165,7 @@ function callSendAPI(senderPsid, response) {
   });
 }
 
-// Set default port and listen for requests
+// Set the default port and start the server
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
