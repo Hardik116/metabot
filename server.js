@@ -1,18 +1,19 @@
 'use strict';
 
-const { OpenAI } = require('openai'); // Import OpenAI SDK
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY, // Add your OpenAI API key in .env file
-});
-
 // Use dotenv to read .env vars into Node
 require('dotenv').config();
 
 // Debug log to verify environment variables are loading
 console.log('Environment variables loaded:');
-console.log('PORT:', process.env.PORT);
+console.log('OPENAI_API_KEY:', process.env.OPENAI_API_KEY ? 'Set' : 'Not Set');
+console.log('PORT:', process.env.PORT || 3000);
 console.log('VERIFY_TOKEN:', process.env.VERIFY_TOKEN ? 'Set' : 'Not Set');
 console.log('PAGE_ACCESS_TOKEN:', process.env.PAGE_ACCESS_TOKEN ? 'Set' : 'Not Set');
+
+const { OpenAI } = require('openai'); // Import OpenAI SDK
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY, // Use the API key from environment variables
+});
 
 // Imports dependencies and sets up http server
 const request = require('request');
@@ -56,7 +57,7 @@ app.post('/webhook', (req, res) => {
 
   if (body.object === 'instagram') {
     // Iterates over each entry - there may be multiple if batched
-    body.entry.forEach(function(entry) {
+    body.entry.forEach(function (entry) {
       // Gets the body of the webhook event
       let webhookEvent = entry.messaging[0];
       console.log(webhookEvent);
@@ -92,7 +93,7 @@ async function handleMessage(senderPsid, receivedMessage) {
 
     // Check if the message is related to your business (optional logic)
     const relevantKeywords = ['shoes', 'size', 'shipping', 'return', 'price', 'order', 'material'];
-    const isRelevant = relevantKeywords.some(keyword => userMessage.toLowerCase().includes(keyword));
+    const isRelevant = relevantKeywords.some((keyword) => userMessage.toLowerCase().includes(keyword));
 
     if (isRelevant) {
       // Send user message to OpenAI for GPT response
@@ -100,35 +101,37 @@ async function handleMessage(senderPsid, receivedMessage) {
     } else {
       // Suggest relevant questions if message is not related to the business
       response = {
-        'text': "It seems like your question is not directly related to our products. You can ask questions like: 'What types of shoes do you offer?', 'What is the return policy?', or 'How do I find my shoe size?'"
+        text: "It seems like your question is not directly related to our products. You can ask questions like: 'What types of shoes do you offer?', 'What is the return policy?', or 'How do I find my shoe size?'",
       };
     }
   } else if (receivedMessage.attachments) {
     let attachmentUrl = receivedMessage.attachments[0].payload.url;
     response = {
-      'attachment': {
-        'type': 'template',
-        'payload': {
-          'template_type': 'generic',
-          'elements': [{
-            'title': 'Is this the right picture?',
-            'subtitle': 'Tap a button to answer.',
-            'image_url': attachmentUrl,
-            'buttons': [
-              {
-                'type': 'postback',
-                'title': 'Yes!',
-                'payload': 'yes',
-              },
-              {
-                'type': 'postback',
-                'title': 'No!',
-                'payload': 'no',
-              }
-            ],
-          }]
-        }
-      }
+      attachment: {
+        type: 'template',
+        payload: {
+          template_type: 'generic',
+          elements: [
+            {
+              title: 'Is this the right picture?',
+              subtitle: 'Tap a button to answer.',
+              image_url: attachmentUrl,
+              buttons: [
+                {
+                  type: 'postback',
+                  title: 'Yes!',
+                  payload: 'yes',
+                },
+                {
+                  type: 'postback',
+                  title: 'No!',
+                  payload: 'no',
+                },
+              ],
+            },
+          ],
+        },
+      },
     };
   }
 
@@ -141,15 +144,15 @@ async function getGPTResponse(userMessage) {
   try {
     const completion = await openai.chat.completions.create({
       messages: [{ role: 'user', content: userMessage }],
-      model: 'gpt-4',  // You can use GPT-3.5 as well if needed
+      model: 'gpt-4', // You can use GPT-3.5 if needed
     });
 
     const gptResponse = completion.choices[0].message.content;
 
-    return { 'text': gptResponse };
+    return { text: gptResponse };
   } catch (error) {
     console.error('Error fetching GPT response:', error);
-    return { 'text': 'Sorry, I could not process your request at the moment. Please try again later.' };
+    return { text: 'Sorry, I could not process your request at the moment. Please try again later.' };
   }
 }
 
@@ -161,9 +164,9 @@ function handlePostback(senderPsid, receivedPostback) {
   let payload = receivedPostback.payload;
 
   if (payload === 'yes') {
-    response = { 'text': 'Thanks!' };
+    response = { text: 'Thanks!' };
   } else if (payload === 'no') {
-    response = { 'text': 'Oops, try sending another image.' };
+    response = { text: 'Oops, try sending another image.' };
   }
 
   // Send the postback response
@@ -176,25 +179,28 @@ function callSendAPI(senderPsid, response) {
 
   // Construct the message body
   let requestBody = {
-    'recipient': {
-      'id': senderPsid
+    recipient: {
+      id: senderPsid,
     },
-    'message': response
+    message: response,
   };
 
   // Send the request to Instagram's Send API
-  request({
-    'uri': 'https://graph.facebook.com/v12.0/me/messages',
-    'qs': { 'access_token': PAGE_ACCESS_TOKEN },
-    'method': 'POST',
-    'json': requestBody
-  }, (err, _res, _body) => {
-    if (!err) {
-      console.log('Message sent!');
-    } else {
-      console.error('Unable to send message:' + err);
+  request(
+    {
+      uri: 'https://graph.facebook.com/v12.0/me/messages',
+      qs: { access_token: PAGE_ACCESS_TOKEN },
+      method: 'POST',
+      json: requestBody,
+    },
+    (err, _res, _body) => {
+      if (!err) {
+        console.log('Message sent!');
+      } else {
+        console.error('Unable to send message:', err);
+      }
     }
-  });
+  );
 }
 
 // Set the default port and start the server
