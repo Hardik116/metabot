@@ -1,5 +1,10 @@
 'use strict';
 
+const { OpenAI } = require('openai'); // Import OpenAI SDK
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY, // Add your OpenAI API key in .env file
+});
+
 // Use dotenv to read .env vars into Node
 require('dotenv').config();
 
@@ -50,10 +55,8 @@ app.post('/webhook', (req, res) => {
   let body = req.body;
 
   if (body.object === 'instagram') {
-
     // Iterates over each entry - there may be multiple if batched
     body.entry.forEach(function(entry) {
-
       // Gets the body of the webhook event
       let webhookEvent = entry.messaging[0];
       console.log(webhookEvent);
@@ -79,16 +82,28 @@ app.post('/webhook', (req, res) => {
 });
 
 // Handles message events from Instagram
-function handleMessage(senderPsid, receivedMessage) {
+async function handleMessage(senderPsid, receivedMessage) {
   let response;
 
   // Check if the message contains text
   if (receivedMessage.text) {
-    response = {
-      'text': `You sent the message: '${receivedMessage.text}'. Now send me an attachment!`
-    };
+    const userMessage = receivedMessage.text;
+    console.log(`Received message: ${userMessage}`);
+
+    // Check if the message is related to your business (optional logic)
+    const relevantKeywords = ['shoes', 'size', 'shipping', 'return', 'price', 'order', 'material'];
+    const isRelevant = relevantKeywords.some(keyword => userMessage.toLowerCase().includes(keyword));
+
+    if (isRelevant) {
+      // Send user message to OpenAI for GPT response
+      response = await getGPTResponse(userMessage);
+    } else {
+      // Suggest relevant questions if message is not related to the business
+      response = {
+        'text': "It seems like your question is not directly related to our products. You can ask questions like: 'What types of shoes do you offer?', 'What is the return policy?', or 'How do I find my shoe size?'"
+      };
+    }
   } else if (receivedMessage.attachments) {
-    // Get the URL of the message attachment (image/video)
     let attachmentUrl = receivedMessage.attachments[0].payload.url;
     response = {
       'attachment': {
@@ -119,6 +134,23 @@ function handleMessage(senderPsid, receivedMessage) {
 
   // Send the response message to Instagram via the API
   callSendAPI(senderPsid, response);
+}
+
+// Function to interact with OpenAI API and get a response
+async function getGPTResponse(userMessage) {
+  try {
+    const completion = await openai.chat.completions.create({
+      messages: [{ role: 'user', content: userMessage }],
+      model: 'gpt-4',  // You can use GPT-3.5 as well if needed
+    });
+
+    const gptResponse = completion.choices[0].message.content;
+
+    return { 'text': gptResponse };
+  } catch (error) {
+    console.error('Error fetching GPT response:', error);
+    return { 'text': 'Sorry, I could not process your request at the moment. Please try again later.' };
+  }
 }
 
 // Handles postback events
