@@ -1,82 +1,209 @@
-const axios = require('axios');
-const express = require('express');
-const ngrok = require('ngrok');
-const app = express();
+/**
+ * Copyright 2021-present, Facebook, Inc. All rights reserved.
+ *
+ * This source code is licensed under the license found in the
+ * LICENSE file in the root directory of this source tree.
+ *
+ * Messenger Platform Quick Start Tutorial
+ *
+ * This is the completed code for the Messenger Platform quick start tutorial
+ *
+ * https://developers.facebook.com/docs/messenger-platform/getting-started/quick-start/
+ *
+ * To run this code, you must do the following:
+ *
+ * 1. Deploy this code to a server running Node.js
+ * 2. Run `yarn install`
+ * 3. Add your VERIFY_TOKEN and PAGE_ACCESS_TOKEN to your environment vars
+ */
 
-// Replace with your actual Instagram Business Account ID and Page Access Token
-const instagramBusinessAccountId = '126174470583595';
-const pageAccessToken = 'EAAOXCjztTBUBOZB13LO1KiB5ZAClGZCUJiQ9K9anWzhWz2WK3w339CgonVKpdXtlsVb4lrwD3Jvdc90vXM4hKlwrc7GpymGzVeGxQZAFXiQObMYk6zQmiI9sAlVEKrKQczTaMjuo2GBOZCk7CgTjOBGROuyT90Ce4zIihR4N7mT49AOJ5McdjiaHTsBeCiksZD';
+'use strict';
 
-// Add Express middleware to parse JSON requests
-app.use(express.json());
+// Use dotenv to read .env vars into Node
+require('dotenv').config();
 
-// Function to send a reply message
-async function sendReplyMessage(recipientId) {
-  try {
-    const response = await axios.post(`https://graph.facebook.com/v15.0/me/messages`, {
-      recipient: { id: recipientId },
-      message: { text: "Hi there! Thanks for reaching out to us. How can we help you today?" }
-    }, {
-      params: { access_token: pageAccessToken }
-    });
-    console.log('Message sent successfully:', response.data);
-  } catch (error) {
-    console.error('Error sending message:', error.response ? error.response.data : error.message);
-  }
-}
+// Debug log to verify environment variables are loading
+console.log('Environment variables loaded:');
+console.log('PORT:', process.env.PORT);
+console.log('VERIFY_TOKEN:', process.env.VERIFY_TOKEN ? 'Set' : 'Not Set');
+console.log('PAGE_ACCESS_TOKEN:', process.env.PAGE_ACCESS_TOKEN ? 'Set' : 'Not Set');
 
-// Webhook verification endpoint
+// Imports dependencies and set up http server
+const
+  request = require('request'),
+  express = require('express'),
+  { urlencoded, json } = require('body-parser'),
+  app = express();
+
+// Parse application/x-www-form-urlencoded
+app.use(urlencoded({ extended: true }));
+
+// Parse application/json
+app.use(json());
+
+// Respond with 'Hello World' when a GET request is made to the homepage
+app.get('/', function (_req, res) {
+  res.send('Hello World');
+});
+
+// Adds support for GET requests to our webhook
 app.get('/webhook', (req, res) => {
-  const mode = req.query['hub.mode'];
-  const token = req.query['hub.verify_token'];
-  const challenge = req.query['hub.challenge'];
 
-  const VERIFY_TOKEN = "hardikrathod";
+  // Your verify token. Should be a random string.
+  const VERIFY_TOKEN = process.env.VERIFY_TOKEN;
 
-  if (mode && token === VERIFY_TOKEN) {
-    res.status(200).send(challenge);
-  } else {
-    res.sendStatus(403);
+  // Parse the query params
+  let mode = req.query['hub.mode'];
+  let token = req.query['hub.verify_token'];
+  let challenge = req.query['hub.challenge'];
+
+  // Checks if a token and mode is in the query string of the request
+  if (mode && token) {
+
+    // Checks the mode and token sent is correct
+    if (mode === 'subscribe' && token === VERIFY_TOKEN) {
+
+      // Responds with the challenge token from the request
+      console.log('WEBHOOK_VERIFIED');
+      res.status(200).send(challenge);
+
+    } else {
+      // Responds with '403 Forbidden' if verify tokens do not match
+      res.sendStatus(403);
+    }
   }
 });
 
-// Webhook endpoint to receive messages
-app.post('/webhook', async (req, res) => {
-    const body = req.body;
-  
-    if (body.object === 'instagram') {
-      body.entry.forEach(async (entry) => {
-        // Update this part to correctly handle Instagram webhook structure
-        const webhookEvent = entry.messaging?.[0];
-        if (webhookEvent) {
-          console.log('Webhook event received:', webhookEvent);
-          
-          if (webhookEvent.message && webhookEvent.message.text) {
-            const senderId = webhookEvent.sender.id;
-            console.log('New message received:', webhookEvent.message.text);
-            
-            // Send greeting message
-            await sendReplyMessage(senderId);
-          }
+// Creates the endpoint for your webhook
+app.post('/webhook', (req, res) => {
+  let body = req.body;
+
+  // Checks if this is an event from a page subscription
+  if (body.object === 'page') {
+
+    // Iterates over each entry - there may be multiple if batched
+    body.entry.forEach(function(entry) {
+
+      // Gets the body of the webhook event
+      let webhookEvent = entry.messaging[0];
+      console.log(webhookEvent);
+
+      // Get the sender PSID
+      let senderPsid = webhookEvent.sender.id;
+      console.log('Sender PSID: ' + senderPsid);
+
+      // Check if the event is a message or postback and
+      // pass the event to the appropriate handler function
+      if (webhookEvent.message) {
+        handleMessage(senderPsid, webhookEvent.message);
+      } else if (webhookEvent.postback) {
+        handlePostback(senderPsid, webhookEvent.postback);
+      }
+    });
+
+    // Returns a '200 OK' response to all requests
+    res.status(200).send('EVENT_RECEIVED');
+  } else {
+
+    // Returns a '404 Not Found' if event is not from a page subscription
+    res.sendStatus(404);
+  }
+});
+
+// Handles messages events
+function handleMessage(senderPsid, receivedMessage) {
+  let response;
+
+  // Checks if the message contains text
+  if (receivedMessage.text) {
+    // Create the payload for a basic text message, which
+    // will be added to the body of your request to the Send API
+    response = {
+      'text': `You sent the message: '${receivedMessage.text}'. Now send me an attachment!`
+    };
+  } else if (receivedMessage.attachments) {
+
+    // Get the URL of the message attachment
+    let attachmentUrl = receivedMessage.attachments[0].payload.url;
+    response = {
+      'attachment': {
+        'type': 'template',
+        'payload': {
+          'template_type': 'generic',
+          'elements': [{
+            'title': 'Is this the right picture?',
+            'subtitle': 'Tap a button to answer.',
+            'image_url': attachmentUrl,
+            'buttons': [
+              {
+                'type': 'postback',
+                'title': 'Yes!',
+                'payload': 'yes',
+              },
+              {
+                'type': 'postback',
+                'title': 'No!',
+                'payload': 'no',
+              }
+            ],
+          }]
         }
-      });
-  
-      res.status(200).send('EVENT_RECEIVED');
+      }
+    };
+  }
+
+  // Send the response message
+  callSendAPI(senderPsid, response);
+}
+
+// Handles messaging_postbacks events
+function handlePostback(senderPsid, receivedPostback) {
+  let response;
+
+  // Get the payload for the postback
+  let payload = receivedPostback.payload;
+
+  // Set the response based on the postback payload
+  if (payload === 'yes') {
+    response = { 'text': 'Thanks!' };
+  } else if (payload === 'no') {
+    response = { 'text': 'Oops, try sending another image.' };
+  }
+  // Send the message to acknowledge the postback
+  callSendAPI(senderPsid, response);
+}
+
+// Sends response messages via the Send API
+function callSendAPI(senderPsid, response) {
+
+  // The page access token we have generated in your app settings
+  const PAGE_ACCESS_TOKEN = process.env.PAGE_ACCESS_TOKEN;
+
+  // Construct the message body
+  let requestBody = {
+    'recipient': {
+      'id': senderPsid
+    },
+    'message': response
+  };
+
+  // Send the HTTP request to the Messenger Platform
+  request({
+    'uri': 'https://graph.facebook.com/v2.6/me/messages',
+    'qs': { 'access_token': PAGE_ACCESS_TOKEN },
+    'method': 'POST',
+    'json': requestBody
+  }, (err, _res, _body) => {
+    if (!err) {
+      console.log('Message sent!');
     } else {
-      res.sendStatus(404);
+      console.error('Unable to send message:' + err);
     }
   });
+}
 
-// Start the server and ngrok
-const PORT = 3000;
-app.listen(PORT, async () => {
+// Set default port and listen for requests
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
-
-  try {
-    const url = await ngrok.connect(PORT);
-    console.log('Ngrok tunnel is active!');
-    console.log('Webhook URL:', `${url}/webhook`);
-  } catch (error) {
-    console.error('Error starting ngrok:', error);
-  }
 });
