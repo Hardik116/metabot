@@ -11,10 +11,13 @@ console.log('VERIFY_TOKEN:', process.env.VERIFY_TOKEN ? 'Set' : 'Not Set');
 console.log('PAGE_ACCESS_TOKEN:', process.env.PAGE_ACCESS_TOKEN ? 'Set' : 'Not Set');
 console.log('MONGO_URI:', process.env.MONGO_URI ? 'Set' : 'Not Set');
 
-const { OpenAI } = require('openai'); // Import OpenAI SDK
+const { OpenAI } = require('openai');
 const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY, // Use the API key from environment variables
+  apiKey: process.env.OPENAI_API_KEY,
 });
+
+// Assistant ID
+const ASSISTANT_ID = 'asst_HRDZ6rjg7CROW41Ygm8GuX74';
 
 // Imports dependencies and sets up http server
 const request = require('request');
@@ -40,10 +43,12 @@ db.once('open', () => {
   console.log('Connected to MongoDB');
 });
 
-// Define the schema for messages
+// Updated schema to include thread ID
 const messageSchema = new mongoose.Schema({
   senderId: String,
-  message: String,
+  userMessage: String,
+  aiResponse: String,
+  threadId: String,
   timestamp: { type: Date, default: Date.now },
 });
 
@@ -105,32 +110,91 @@ app.post('/webhook', (req, res) => {
   }
 });
 
-// Handles message events from Instagram
+// Function to interact with OpenAI Assistant
+async function getAssistantResponse(userMessage, threadId) {
+  try {
+    let thread;
+    
+    // If no threadId, create a new thread
+    if (!threadId) {
+      thread = await openai.beta.threads.create();
+    } else {
+      thread = { id: threadId };
+    }
+
+    // Add the user's message to the thread
+    await openai.beta.threads.messages.create(thread.id, {
+      role: "user",
+      content: userMessage
+    });
+
+    // Run the assistant
+    const run = await openai.beta.threads.runs.create(thread.id, {
+      assistant_id: ASSISTANT_ID
+    });
+
+    // Wait for the completion
+    let runStatus = await openai.beta.threads.runs.retrieve(thread.id, run.id);
+    
+    // Poll for completion
+    while (runStatus.status !== 'completed') {
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      runStatus = await openai.beta.threads.runs.retrieve(thread.id, run.id);
+      
+      if (runStatus.status === 'failed') {
+        throw new Error('Assistant run failed');
+      }
+    }
+
+    // Get the messages
+    const messages = await openai.beta.threads.messages.list(thread.id);
+    const lastMessage = messages.data[0];
+
+    return {
+      text: lastMessage.content[0].text.value,
+      threadId: thread.id
+    };
+  } catch (error) {
+    console.error('Error with Assistant:', error);
+    return {
+      text: 'Sorry, I could not process your request at the moment. Please try again later.',
+      threadId: null
+    };
+  }
+}
+
+// Updated handleMessage function to maintain conversation thread
 async function handleMessage(senderPsid, receivedMessage) {
   let response;
-
-  // Save the message to the database
-  const messageText = receivedMessage.text || '[Attachment]';
-  const newMessage = new Message({
-    senderId: senderPsid,
-    message: messageText,
-  });
-
-  // Save the message to MongoDB
-  try {
-    await newMessage.save();
-    console.log('Sender message saved to MongoDB:', newMessage);
-  } catch (error) {
-    console.error('Error saving sender message:', error);
-  }
 
   // Check if the message contains text
   if (receivedMessage.text) {
     const userMessage = receivedMessage.text;
     console.log(`Received message: ${userMessage}`);
 
-    // Send user message to OpenAI for GPT response
-    response = await getGPTResponse(userMessage);
+    // Find the last message from this sender to get their thread ID
+    const lastMessage = await Message.findOne({ senderId: senderPsid }).sort({ timestamp: -1 });
+    const threadId = lastMessage?.threadId;
+
+    // Send user message to OpenAI Assistant
+    const assistantResponse = await getAssistantResponse(userMessage, threadId);
+    response = { text: assistantResponse.text };
+
+    // Save both user message and AI response to MongoDB
+    const newMessage = new Message({
+      senderId: senderPsid,
+      userMessage: userMessage,
+      aiResponse: assistantResponse.text,
+      threadId: assistantResponse.threadId
+    });
+
+    // Save to MongoDB
+    try {
+      await newMessage.save();
+      console.log('Conversation saved to MongoDB:', newMessage);
+    } catch (error) {
+      console.error('Error saving conversation:', error);
+    }
   } else if (receivedMessage.attachments) {
     let attachmentUrl = receivedMessage.attachments[0].payload.url;
     response = {
@@ -164,23 +228,6 @@ async function handleMessage(senderPsid, receivedMessage) {
 
   // Send the response message to Instagram via the API
   callSendAPI(senderPsid, response);
-}
-
-// Function to interact with OpenAI API and get a response
-async function getGPTResponse(userMessage) {
-  try {
-    const completion = await openai.chat.completions.create({
-      messages: [{ role: 'user', content: userMessage }],
-      model: 'gpt-4',
-    });
-
-    const gptResponse = completion.choices[0].message.content;
-
-    return { text: gptResponse };
-  } catch (error) {
-    console.error('Error fetching GPT response:', error);
-    return { text: 'Sorry, I could not process your request at the moment. Please try again later.' };
-  }
 }
 
 // Handles postback events
