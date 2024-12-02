@@ -9,6 +9,7 @@ console.log('OPENAI_API_KEY:', process.env.OPENAI_API_KEY ? 'Set' : 'Not Set');
 console.log('PORT:', process.env.PORT || 3000);
 console.log('VERIFY_TOKEN:', process.env.VERIFY_TOKEN ? 'Set' : 'Not Set');
 console.log('PAGE_ACCESS_TOKEN:', process.env.PAGE_ACCESS_TOKEN ? 'Set' : 'Not Set');
+console.log('MONGO_URI:', process.env.MONGO_URI ? 'Set' : 'Not Set');
 
 const { OpenAI } = require('openai'); // Import OpenAI SDK
 const openai = new OpenAI({
@@ -18,6 +19,7 @@ const openai = new OpenAI({
 // Imports dependencies and sets up http server
 const request = require('request');
 const express = require('express');
+const mongoose = require('mongoose');
 const { urlencoded, json } = require('body-parser');
 const app = express();
 
@@ -27,9 +29,30 @@ app.use(urlencoded({ extended: true }));
 // Parse application/json
 app.use(json());
 
+// Connect to MongoDB
+mongoose.connect(process.env.MONGO_URI, {
+  useNewUrlParser: true,
+  useUnifiedTopology: true,
+});
+const db = mongoose.connection;
+db.on('error', console.error.bind(console, 'MongoDB connection error:'));
+db.once('open', () => {
+  console.log('Connected to MongoDB');
+});
+
+// Define the schema for messages
+const messageSchema = new mongoose.Schema({
+  senderId: String,
+  message: String,
+  timestamp: { type: Date, default: Date.now },
+});
+
+// Create a model
+const Message = mongoose.model('Message', messageSchema);
+
 // Respond with 'Hello World' when a GET request is made to the homepage
 app.get('/', function (_req, res) {
-  res.send('Hello World hello');
+  res.send('Hello World');
 });
 
 // Adds support for GET requests to our webhook
@@ -86,24 +109,27 @@ app.post('/webhook', (req, res) => {
 async function handleMessage(senderPsid, receivedMessage) {
   let response;
 
+  // Save the message to the database
+  const messageText = receivedMessage.text || '[Attachment]';
+  const newMessage = new Message({
+    senderId: senderPsid,
+    message: messageText,
+  });
+
+  try {
+    await newMessage.save();
+    console.log('Message saved to the database');
+  } catch (error) {
+    console.error('Error saving message:', error);
+  }
+
   // Check if the message contains text
   if (receivedMessage.text) {
     const userMessage = receivedMessage.text;
     console.log(`Received message: ${userMessage}`);
 
-    // Check if the message is related to your business (optional logic)
-    const relevantKeywords = ['shoes', 'size', 'shipping', 'return', 'price', 'order', 'material'];
-    const isRelevant = relevantKeywords.some((keyword) => userMessage.toLowerCase().includes(keyword));
-
-    if (isRelevant) {
-      // Send user message to OpenAI for GPT response
-      response = await getGPTResponse(userMessage);
-    } else {
-      // Suggest relevant questions if message is not related to the business
-      response = {
-        text: "It seems like your question is not directly related to our products. You can ask questions like: 'What types of shoes do you offer?', 'What is the return policy?', or 'How do I find my shoe size?'",
-      };
-    }
+    // Send user message to OpenAI for GPT response
+    response = await getGPTResponse(userMessage);
   } else if (receivedMessage.attachments) {
     let attachmentUrl = receivedMessage.attachments[0].payload.url;
     response = {
@@ -144,7 +170,7 @@ async function getGPTResponse(userMessage) {
   try {
     const completion = await openai.chat.completions.create({
       messages: [{ role: 'user', content: userMessage }],
-      model: 'gpt-4', // You can use GPT-3.5 if needed
+      model: 'gpt-4',
     });
 
     const gptResponse = completion.choices[0].message.content;
