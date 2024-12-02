@@ -116,11 +116,12 @@ async function handleMessage(senderPsid, receivedMessage) {
     message: messageText,
   });
 
+  // Save the message to MongoDB
   try {
     await newMessage.save();
-    console.log('Message saved to the database');
+    console.log('Sender message saved to MongoDB:', newMessage);
   } catch (error) {
-    console.error('Error saving message:', error);
+    console.error('Error saving sender message:', error);
   }
 
   // Check if the message contains text
