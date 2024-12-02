@@ -9,17 +9,15 @@ console.log('OPENAI_API_KEY:', process.env.OPENAI_API_KEY ? 'Set' : 'Not Set');
 console.log('PORT:', process.env.PORT || 3000);
 console.log('VERIFY_TOKEN:', process.env.VERIFY_TOKEN ? 'Set' : 'Not Set');
 console.log('PAGE_ACCESS_TOKEN:', process.env.PAGE_ACCESS_TOKEN ? 'Set' : 'Not Set');
-console.log('MONGO_URI:', process.env.MONGO_URI ? 'Set' : 'Not Set');
 
-const { OpenAI } = require('openai');
+const { OpenAI } = require('openai'); // Import OpenAI SDK
 const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
+  apiKey: process.env.OPENAI_API_KEY, // Use the API key from environment variables
 });
 
 // Imports dependencies and sets up http server
 const request = require('request');
 const express = require('express');
-const mongoose = require('mongoose');
 const { urlencoded, json } = require('body-parser');
 const app = express();
 
@@ -28,28 +26,6 @@ app.use(urlencoded({ extended: true }));
 
 // Parse application/json
 app.use(json());
-
-// Connect to MongoDB
-mongoose.connect(process.env.MONGO_URI, {
-  useNewUrlParser: true,
-  useUnifiedTopology: true,
-});
-const db = mongoose.connection;
-db.on('error', console.error.bind(console, 'MongoDB connection error:'));
-db.once('open', () => {
-  console.log('Connected to MongoDB');
-});
-
-// Updated schema to include both user message and AI response
-const messageSchema = new mongoose.Schema({
-  senderId: String,
-  userMessage: String,
-  aiResponse: String,
-  timestamp: { type: Date, default: Date.now },
-});
-
-// Create a model
-const Message = mongoose.model('Message', messageSchema);
 
 // Respond with 'Hello World' when a GET request is made to the homepage
 app.get('/', function (_req, res) {
@@ -106,7 +82,7 @@ app.post('/webhook', (req, res) => {
   }
 });
 
-// Updated handleMessage function to save both user message and AI response
+// Handles message events from Instagram
 async function handleMessage(senderPsid, receivedMessage) {
   let response;
 
@@ -115,21 +91,18 @@ async function handleMessage(senderPsid, receivedMessage) {
     const userMessage = receivedMessage.text;
     console.log(`Received message: ${userMessage}`);
 
-    response = await getGPTResponse(userMessage);
+    // Check if the message is related to your business (optional logic)
+    const relevantKeywords = ['shoes', 'size', 'shipping', 'return', 'price', 'order', 'material'];
+    const isRelevant = relevantKeywords.some((keyword) => userMessage.toLowerCase().includes(keyword));
 
-    // Save both user message and AI response to MongoDB
-    const newMessage = new Message({
-      senderId: senderPsid,
-      userMessage: userMessage,
-      aiResponse: response.text
-    });
-
-    // Save to MongoDB
-    try {
-      await newMessage.save();
-      console.log('Conversation saved to MongoDB:', newMessage);
-    } catch (error) {
-      console.error('Error saving conversation:', error);
+    if (isRelevant) {
+      // Send user message to OpenAI for GPT response
+      response = await getGPTResponse(userMessage);
+    } else {
+      // Suggest relevant questions if message is not related to the business
+      response = {
+        text: "It seems like your question is not directly related to our products. You can ask questions like: 'What types of shoes do you offer?', 'What is the return policy?', or 'How do I find my shoe size?'",
+      };
     }
   } else if (receivedMessage.attachments) {
     let attachmentUrl = receivedMessage.attachments[0].payload.url;
@@ -171,7 +144,7 @@ async function getGPTResponse(userMessage) {
   try {
     const completion = await openai.chat.completions.create({
       messages: [{ role: 'user', content: userMessage }],
-      model: 'gpt-3.5-turbo-0125',
+      model: 'gpt-4', // You can use GPT-3.5 if needed
     });
 
     const gptResponse = completion.choices[0].message.content;
@@ -186,6 +159,7 @@ async function getGPTResponse(userMessage) {
 // Handles postback events
 function handlePostback(senderPsid, receivedPostback) {
   let response;
+
   // Get the payload for the postback
   let payload = receivedPostback.payload;
 
