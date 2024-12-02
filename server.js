@@ -71,17 +71,21 @@ app.get('/webhook', (req, res) => {
 });
 
 // Route: Webhook Listener
-app.post('/webhook', async (req, res) => {
+app.post('/webhook', (req, res) => {
   let body = req.body;
 
   if (body.object === 'instagram') {
+    // Iterates over each entry - there may be multiple if batched
     body.entry.forEach(function (entry) {
+      // Gets the body of the webhook event
       let webhookEvent = entry.messaging[0];
       console.log(webhookEvent);
 
+      // Get the sender ID (PSID or Instagram ID)
       let senderPsid = webhookEvent.sender.id;
       console.log('Sender PSID: ' + senderPsid);
 
+      // Handle the received message
       if (webhookEvent.message) {
         handleMessage(senderPsid, webhookEvent.message);
       } else if (webhookEvent.postback) {
@@ -89,8 +93,10 @@ app.post('/webhook', async (req, res) => {
       }
     });
 
+    // Returns a '200 OK' response to acknowledge receipt of the event
     res.status(200).send('EVENT_RECEIVED');
   } else {
+    // Returns a '404 Not Found' if the event is not from an Instagram subscription
     res.sendStatus(404);
   }
 });
