@@ -142,12 +142,8 @@ async function getGPTResponseWithTimeout(userMessage) {
     return { text: completion.choices[0].message.content };
   } catch (error) {
     console.error('Error fetching GPT response:', error);
-    if (error.name === 'AbortError') {
-      console.error('OpenAI API call timed out.');
-      return { text: 'The request took too long to process. Please try again later.' };
-    } else {
       return { text: 'Sorry, an error occurred while processing your request. Please try again.' };
-    }
+    
   }
 }
 
