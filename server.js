@@ -56,28 +56,23 @@ app.post('/webhook', (req, res) => {
   let body = req.body;
 
   if (body.object === 'instagram') {
-    // Iterates over each entry - there may be multiple if batched
-    body.entry.forEach(function (entry) {
-      // Gets the body of the webhook event
+    res.status(200).send('EVENT_RECEIVED'); // Acknowledge receipt quickly
+
+    // Process events asynchronously
+    body.entry.forEach(async function (entry) {
       let webhookEvent = entry.messaging[0];
       console.log(webhookEvent);
 
-      // Get the sender ID (PSID or Instagram ID)
       let senderPsid = webhookEvent.sender.id;
       console.log('Sender PSID: ' + senderPsid);
 
-      // Handle the received message
       if (webhookEvent.message) {
-        handleMessage(senderPsid, webhookEvent.message);
+        await handleMessage(senderPsid, webhookEvent.message);
       } else if (webhookEvent.postback) {
         handlePostback(senderPsid, webhookEvent.postback);
       }
     });
-
-    // Returns a '200 OK' response to acknowledge receipt of the event
-    res.status(200).send('EVENT_RECEIVED');
   } else {
-    // Returns a '404 Not Found' if the event is not from an Instagram subscription
     res.sendStatus(404);
   }
 });
@@ -86,20 +81,18 @@ app.post('/webhook', (req, res) => {
 async function handleMessage(senderPsid, receivedMessage) {
   let response;
 
-  // Check if the message contains text
   if (receivedMessage.text) {
     const userMessage = receivedMessage.text;
     console.log(`Received message: ${userMessage}`);
 
-    // Check if the message is related to your business (optional logic)
     const relevantKeywords = ['shoes', 'size', 'shipping', 'return', 'price', 'order', 'material'];
     const isRelevant = relevantKeywords.some((keyword) => userMessage.toLowerCase().includes(keyword));
 
     if (isRelevant) {
-      // Send user message to OpenAI for GPT response
-      response = await getGPTResponse(userMessage);
+      // Use OpenAI API for relevant questions
+      response = await getGPTResponseWithTimeout(userMessage);
     } else {
-      // Suggest relevant questions if message is not related to the business
+      // Suggest relevant questions for unrelated messages
       response = {
         text: "It seems like your question is not directly related to our products. You can ask questions like: 'What types of shoes do you offer?', 'What is the return policy?', or 'How do I find my shoe size?'",
       };
@@ -117,16 +110,8 @@ async function handleMessage(senderPsid, receivedMessage) {
               subtitle: 'Tap a button to answer.',
               image_url: attachmentUrl,
               buttons: [
-                {
-                  type: 'postback',
-                  title: 'Yes!',
-                  payload: 'yes',
-                },
-                {
-                  type: 'postback',
-                  title: 'No!',
-                  payload: 'no',
-                },
+                { type: 'postback', title: 'Yes!', payload: 'yes' },
+                { type: 'postback', title: 'No!', payload: 'no' },
               ],
             },
           ],
@@ -135,24 +120,34 @@ async function handleMessage(senderPsid, receivedMessage) {
     };
   }
 
-  // Send the response message to Instagram via the API
   callSendAPI(senderPsid, response);
 }
 
-// Function to interact with OpenAI API and get a response
-async function getGPTResponse(userMessage) {
+// Function to interact with OpenAI API and get a response with a timeout
+async function getGPTResponseWithTimeout(userMessage) {
+  const timeout = 5000; // 5 seconds
   try {
-    const completion = await openai.chat.completions.create({
-      messages: [{ role: 'user', content: userMessage }],
-      model: 'gpt-3.5-turbo-0125', // You can use GPT-3.5 if needed
-    });
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeout);
 
-    const gptResponse = completion.choices[0].message.content;
+    const completion = await openai.chat.completions.create(
+      {
+        messages: [{ role: 'user', content: userMessage }],
+        model: 'gpt-3.5-turbo-0125',
+      },
+      { signal: controller.signal }
+    );
 
-    return { text: gptResponse };
+    clearTimeout(timeoutId);
+    return { text: completion.choices[0].message.content };
   } catch (error) {
     console.error('Error fetching GPT response:', error);
-    return { text: 'Sorry, I could not process your request at the moment. Please try again later.' };
+    if (error.name === 'AbortError') {
+      console.error('OpenAI API call timed out.');
+      return { text: 'The request took too long to process. Please try again later.' };
+    } else {
+      return { text: 'Sorry, an error occurred while processing your request. Please try again.' };
+    }
   }
 }
 
@@ -160,7 +155,6 @@ async function getGPTResponse(userMessage) {
 function handlePostback(senderPsid, receivedPostback) {
   let response;
 
-  // Get the payload for the postback
   let payload = receivedPostback.payload;
 
   if (payload === 'yes') {
@@ -169,7 +163,6 @@ function handlePostback(senderPsid, receivedPostback) {
     response = { text: 'Oops, try sending another image.' };
   }
 
-  // Send the postback response
   callSendAPI(senderPsid, response);
 }
 
@@ -177,15 +170,11 @@ function handlePostback(senderPsid, receivedPostback) {
 function callSendAPI(senderPsid, response) {
   const PAGE_ACCESS_TOKEN = process.env.PAGE_ACCESS_TOKEN;
 
-  // Construct the message body
   let requestBody = {
-    recipient: {
-      id: senderPsid,
-    },
+    recipient: { id: senderPsid },
     message: response,
   };
 
-  // Send the request to Instagram's Send API
   request(
     {
       uri: 'https://graph.facebook.com/v12.0/me/messages',
