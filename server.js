@@ -5,15 +5,14 @@ require('dotenv').config();
 
 // Debug log to verify environment variables are loading
 console.log('Environment variables loaded:');
-console.log('OPENAI_API_KEY:', process.env.OPENAI_API_KEY ? 'Set' : 'Not Set');
+console.log('HUGGINGFACE_API_KEY:', process.env.HUGGINGFACE_API_KEY ? 'Set' : 'Not Set');
 console.log('PORT:', process.env.PORT || 3000);
 console.log('VERIFY_TOKEN:', process.env.VERIFY_TOKEN ? 'Set' : 'Not Set');
 console.log('PAGE_ACCESS_TOKEN:', process.env.PAGE_ACCESS_TOKEN ? 'Set' : 'Not Set');
 
-const { OpenAI } = require('openai'); // Import OpenAI SDK
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY, // Use the API key from environment variables
-});
+// Import Hugging Face Inference SDK
+const { HfInference } = require('@huggingface/inference');
+const hf = new HfInference(process.env.HUGGINGFACE_API_KEY); // Hugging Face API key
 
 // Imports dependencies and sets up http server
 const request = require('request');
@@ -91,19 +90,8 @@ async function handleMessage(senderPsid, receivedMessage) {
     const userMessage = receivedMessage.text;
     console.log(`Received message: ${userMessage}`);
 
-    // Check if the message is related to your business (optional logic)
-    const relevantKeywords = ['shoes', 'size', 'shipping', 'return', 'price', 'order', 'material'];
-    const isRelevant = relevantKeywords.some((keyword) => userMessage.toLowerCase().includes(keyword));
-
-    if (isRelevant) {
-      // Send user message to OpenAI for GPT response
-      response = await getGPTResponse(userMessage);
-    } else {
-      // Suggest relevant questions if message is not related to the business
-      response = {
-        text: "It seems like your question is not directly related to our products. You can ask questions like: 'What types of shoes do you offer?', 'What is the return policy?', or 'How do I find my shoe size?'",
-      };
-    }
+    // Generate response from Hugging Face model
+    response = await getHuggingFaceResponse(userMessage);
   } else if (receivedMessage.attachments) {
     let attachmentUrl = receivedMessage.attachments[0].payload.url;
     response = {
@@ -139,19 +127,21 @@ async function handleMessage(senderPsid, receivedMessage) {
   callSendAPI(senderPsid, response);
 }
 
-// Function to interact with OpenAI API and get a response
-async function getGPTResponse(userMessage) {
+// Function to interact with Hugging Face API and get a response
+async function getHuggingFaceResponse(userMessage) {
   try {
-    const completion = await openai.chat.completions.create({
-      messages: [{ role: 'user', content: userMessage }],
-      model: 'gpt-3.5-turbo-0125', // You can use GPT-3.5 if needed
+    const response = await hf.textGeneration({
+      model: 'gpt2', // Use 'distilgpt2' for a lighter model
+      inputs: userMessage,
+      parameters: { max_new_tokens: 100, temperature: 0.7 },
     });
 
-    const gptResponse = completion.choices[0].message.content;
+    const generatedText = response.generated_text;
+    console.log('Hugging Face response:', generatedText);
 
-    return { text: gptResponse };
+    return { text: generatedText };
   } catch (error) {
-    console.error('Error fetching GPT response:', error);
+    console.error('Error fetching Hugging Face response:', error);
     return { text: 'Sorry, I could not process your request at the moment. Please try again later.' };
   }
 }
