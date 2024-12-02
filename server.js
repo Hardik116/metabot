@@ -93,10 +93,8 @@ app.post('/webhook', (req, res) => {
       }
     });
 
-    // Returns a '200 OK' response to acknowledge receipt of the event
     res.status(200).send('EVENT_RECEIVED');
   } else {
-    // Returns a '404 Not Found' if the event is not from an Instagram subscription
     res.sendStatus(404);
   }
 });
