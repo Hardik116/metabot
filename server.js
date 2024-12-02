@@ -5,10 +5,15 @@ require('dotenv').config();
 
 // Debug log to verify environment variables are loading
 console.log('Environment variables loaded:');
-console.log('GEMINI_API_KEY:', process.env.GEMINI_API_KEY ? 'Set' : 'Not Set');
+console.log('OPENAI_API_KEY:', process.env.OPENAI_API_KEY ? 'Set' : 'Not Set');
 console.log('PORT:', process.env.PORT || 3000);
 console.log('VERIFY_TOKEN:', process.env.VERIFY_TOKEN ? 'Set' : 'Not Set');
 console.log('PAGE_ACCESS_TOKEN:', process.env.PAGE_ACCESS_TOKEN ? 'Set' : 'Not Set');
+
+const { OpenAI } = require('openai'); // Import OpenAI SDK
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY, // Use the API key from environment variables
+});
 
 // Imports dependencies and sets up http server
 const request = require('request');
@@ -91,8 +96,8 @@ async function handleMessage(senderPsid, receivedMessage) {
     const isRelevant = relevantKeywords.some((keyword) => userMessage.toLowerCase().includes(keyword));
 
     if (isRelevant) {
-      // Send user message to Gemini for text response
-      response = await getGeminiResponse(userMessage);
+      // Send user message to OpenAI for GPT response
+      response = await getGPTResponse(userMessage);
     } else {
       // Suggest relevant questions if message is not related to the business
       response = {
@@ -134,32 +139,19 @@ async function handleMessage(senderPsid, receivedMessage) {
   callSendAPI(senderPsid, response);
 }
 
-// Function to interact with Gemini API and get a response
-async function getGeminiResponse(userMessage) {
+// Function to interact with OpenAI API and get a response
+async function getGPTResponse(userMessage) {
   try {
-    const options = {
-      uri: 'https://api.gemini.com/v1/chat/completions', // Gemini API endpoint for chat completion
-      method: 'POST',
-      json: {
-        model: 'gemini-model', // Specify Gemini model
-        messages: [{ role: 'user', content: userMessage }],
-        api_key: process.env.GEMINI_API_KEY, // Your Gemini API key
-      },
-    };
-
-    // Send request to Gemini API
-    const response = await new Promise((resolve, reject) => {
-      request(options, (error, _response, body) => {
-        if (error) {
-          reject('Error fetching Gemini response');
-        }
-        resolve(body);
-      });
+    const completion = await openai.chat.completions.create({
+      messages: [{ role: 'user', content: userMessage }],
+      model: 'gpt-3.5-turbo-0125', // You can use GPT-3.5 if needed
     });
 
-    return { text: response.choices[0].message.content };
+    const gptResponse = completion.choices[0].message.content;
+
+    return { text: gptResponse };
   } catch (error) {
-    console.error('Error fetching Gemini response:', error);
+    console.error('Error fetching GPT response:', error);
     return { text: 'Sorry, I could not process your request at the moment. Please try again later.' };
   }
 }
