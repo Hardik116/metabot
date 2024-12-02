@@ -115,7 +115,6 @@ async function handleMessage(senderPsid, receivedMessage) {
     const userMessage = receivedMessage.text;
     console.log(`Received message: ${userMessage}`);
 
-    // Send user message to OpenAI for GPT response
     response = await getGPTResponse(userMessage);
 
     // Save both user message and AI response to MongoDB
@@ -172,7 +171,7 @@ async function getGPTResponse(userMessage) {
   try {
     const completion = await openai.chat.completions.create({
       messages: [{ role: 'user', content: userMessage }],
-      model: 'gpt-4',
+      model: 'gpt-3.5-turbo-0125',
     });
 
     const gptResponse = completion.choices[0].message.content;
