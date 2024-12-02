@@ -186,7 +186,6 @@ async function getGPTResponse(userMessage) {
 // Handles postback events
 function handlePostback(senderPsid, receivedPostback) {
   let response;
-
   // Get the payload for the postback
   let payload = receivedPostback.payload;
 
