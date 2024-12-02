@@ -5,20 +5,17 @@ require('dotenv').config();
 
 // Debug log for environment variables
 console.log('Environment variables loaded:');
-console.log('HUGGINGFACE_API_KEY:', process.env.HUGGINGFACE_API_KEY ? 'Set' : 'Not Set');
+console.log('GEMINI_API_KEY:', process.env.GEMINI_API_KEY ? 'Set' : 'Not Set');
 console.log('PORT:', process.env.PORT || 3000);
 console.log('VERIFY_TOKEN:', process.env.VERIFY_TOKEN ? 'Set' : 'Not Set');
 console.log('PAGE_ACCESS_TOKEN:', process.env.PAGE_ACCESS_TOKEN ? 'Set' : 'Not Set');
 
 // Import dependencies
-const { HfInference } = require('@huggingface/inference');
 const mongoose = require('mongoose');
 const express = require('express');
 const { urlencoded, json } = require('body-parser');
 const request = require('request');
-
-// Initialize Hugging Face Inference API
-const hf = new HfInference(process.env.HUGGINGFACE_API_KEY);
+const fetch = require('node-fetch');
 
 // Initialize Express app
 const app = express();
@@ -26,9 +23,9 @@ app.use(urlencoded({ extended: true }));
 app.use(json());
 
 // Connect to MongoDB
-mongoose.connect(process.env.MONGO_URI);
-
-console.log('Connected to MongoDB');
+mongoose.connect(process.env.MONGO_URI, { useNewUrlParser: true, useUnifiedTopology: true })
+  .then(() => console.log('Connected to MongoDB'))
+  .catch(err => console.error('Error connecting to MongoDB:', err));
 
 // Define Mongoose schemas and models
 const userQuerySchema = new mongoose.Schema({
@@ -112,17 +109,17 @@ async function handleMessage(senderPsid, receivedMessage) {
     await userQuery.save();
 
     // Get AI response
-    const hfResponse = await getHuggingFaceResponse(userMessage);
+    const geminiResponse = await getGeminiResponse(userMessage);
 
     // Save AI response to MongoDB
     const aiResponse = new AiResponse({
       senderId: senderPsid,
       query: userMessage,
-      response: hfResponse.text,
+      response: geminiResponse.text,
     });
     await aiResponse.save();
 
-    response = hfResponse;
+    response = geminiResponse;
   } else if (receivedMessage.attachments) {
     let attachmentUrl = receivedMessage.attachments[0].payload.url;
     response = {
@@ -149,21 +146,33 @@ async function handleMessage(senderPsid, receivedMessage) {
   callSendAPI(senderPsid, response);
 }
 
-// Function: Get Hugging Face Response
-async function getHuggingFaceResponse(userMessage) {
+// Function: Get Gemini Response
+async function getGeminiResponse(userMessage) {
   try {
-    const response = await hf.textGeneration({
-      model: 'gpt2',
-      inputs: userMessage,
-      parameters: { max_new_tokens: 100, temperature: 0.7 },
+    const response = await fetch('https://api.gemini-platform.com/v1/generate', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${process.env.GEMINI_API_KEY}`,
+      },
+      body: JSON.stringify({
+        prompt: userMessage,
+        max_tokens: 100,
+        temperature: 0.7,
+      }),
     });
 
-    const generatedText = response.generated_text;
-    console.log('Hugging Face response:', generatedText);
+    if (!response.ok) {
+      throw new Error(`Gemini API error: ${response.statusText}`);
+    }
+
+    const data = await response.json();
+    const generatedText = data.generated_text;
+    console.log('Gemini response:', generatedText);
 
     return { text: generatedText };
   } catch (error) {
-    console.error('Error fetching Hugging Face response:', error);
+    console.error('Error fetching Gemini response:', error);
     return { text: 'Sorry, I could not process your request at the moment.' };
   }
 }
