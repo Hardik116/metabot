@@ -144,7 +144,7 @@ async function getGPTResponse(userMessage) {
   try {
     const completion = await openai.chat.completions.create({
       messages: [{ role: 'user', content: userMessage }],
-      model: 'gpt-4', // You can use GPT-3.5 if needed
+      model: 'gpt-3.5-turbo-0125', // You can use GPT-3.5 if needed
     });
 
     const gptResponse = completion.choices[0].message.content;
