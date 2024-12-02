@@ -1,41 +1,61 @@
 'use strict';
 
-// Use dotenv to read .env vars into Node
+// Load environment variables
 require('dotenv').config();
 
-// Debug log to verify environment variables are loading
+// Debug log for environment variables
 console.log('Environment variables loaded:');
 console.log('HUGGINGFACE_API_KEY:', process.env.HUGGINGFACE_API_KEY ? 'Set' : 'Not Set');
 console.log('PORT:', process.env.PORT || 3000);
 console.log('VERIFY_TOKEN:', process.env.VERIFY_TOKEN ? 'Set' : 'Not Set');
 console.log('PAGE_ACCESS_TOKEN:', process.env.PAGE_ACCESS_TOKEN ? 'Set' : 'Not Set');
 
-// Import Hugging Face Inference SDK
+// Import dependencies
 const { HfInference } = require('@huggingface/inference');
-const hf = new HfInference(process.env.HUGGINGFACE_API_KEY); // Hugging Face API key
-
-// Imports dependencies and sets up http server
-const request = require('request');
+const mongoose = require('mongoose');
 const express = require('express');
 const { urlencoded, json } = require('body-parser');
+const request = require('request');
+
+// Initialize Hugging Face Inference API
+const hf = new HfInference(process.env.HUGGINGFACE_API_KEY);
+
+// Initialize Express app
 const app = express();
-
-// Parse application/x-www-form-urlencoded
 app.use(urlencoded({ extended: true }));
-
-// Parse application/json
 app.use(json());
 
-// Respond with 'Hello World' when a GET request is made to the homepage
-app.get('/', function (_req, res) {
+// Connect to MongoDB
+mongoose.connect(process.env.MONGO_URI);
+
+console.log('Connected to MongoDB');
+
+// Define Mongoose schemas and models
+const userQuerySchema = new mongoose.Schema({
+  senderId: String,
+  query: String,
+  timestamp: { type: Date, default: Date.now },
+});
+
+const aiResponseSchema = new mongoose.Schema({
+  senderId: String,
+  query: String,
+  response: String,
+  timestamp: { type: Date, default: Date.now },
+});
+
+const UserQuery = mongoose.model('UserQuery', userQuerySchema);
+const AiResponse = mongoose.model('AiResponse', aiResponseSchema);
+
+// Route: Home
+app.get('/', (_req, res) => {
   res.send('Hello World');
 });
 
-// Adds support for GET requests to our webhook
+// Route: Webhook Verification
 app.get('/webhook', (req, res) => {
   const VERIFY_TOKEN = process.env.VERIFY_TOKEN;
 
-  // Parse the query params
   let mode = req.query['hub.mode'];
   let token = req.query['hub.verify_token'];
   let challenge = req.query['hub.challenge'];
@@ -50,22 +70,18 @@ app.get('/webhook', (req, res) => {
   }
 });
 
-// Creates the endpoint for your webhook to receive messages from Instagram
-app.post('/webhook', (req, res) => {
+// Route: Webhook Listener
+app.post('/webhook', async (req, res) => {
   let body = req.body;
 
   if (body.object === 'instagram') {
-    // Iterates over each entry - there may be multiple if batched
     body.entry.forEach(function (entry) {
-      // Gets the body of the webhook event
       let webhookEvent = entry.messaging[0];
       console.log(webhookEvent);
 
-      // Get the sender ID (PSID or Instagram ID)
       let senderPsid = webhookEvent.sender.id;
       console.log('Sender PSID: ' + senderPsid);
 
-      // Handle the received message
       if (webhookEvent.message) {
         handleMessage(senderPsid, webhookEvent.message);
       } else if (webhookEvent.postback) {
@@ -73,25 +89,36 @@ app.post('/webhook', (req, res) => {
       }
     });
 
-    // Returns a '200 OK' response to acknowledge receipt of the event
     res.status(200).send('EVENT_RECEIVED');
   } else {
-    // Returns a '404 Not Found' if the event is not from an Instagram subscription
     res.sendStatus(404);
   }
 });
 
-// Handles message events from Instagram
+// Function: Handle Messages
 async function handleMessage(senderPsid, receivedMessage) {
   let response;
 
-  // Check if the message contains text
   if (receivedMessage.text) {
     const userMessage = receivedMessage.text;
     console.log(`Received message: ${userMessage}`);
 
-    // Generate response from Hugging Face model
-    response = await getHuggingFaceResponse(userMessage);
+    // Save user query to MongoDB
+    const userQuery = new UserQuery({ senderId: senderPsid, query: userMessage });
+    await userQuery.save();
+
+    // Get AI response
+    const hfResponse = await getHuggingFaceResponse(userMessage);
+
+    // Save AI response to MongoDB
+    const aiResponse = new AiResponse({
+      senderId: senderPsid,
+      query: userMessage,
+      response: hfResponse.text,
+    });
+    await aiResponse.save();
+
+    response = hfResponse;
   } else if (receivedMessage.attachments) {
     let attachmentUrl = receivedMessage.attachments[0].payload.url;
     response = {
@@ -105,16 +132,8 @@ async function handleMessage(senderPsid, receivedMessage) {
               subtitle: 'Tap a button to answer.',
               image_url: attachmentUrl,
               buttons: [
-                {
-                  type: 'postback',
-                  title: 'Yes!',
-                  payload: 'yes',
-                },
-                {
-                  type: 'postback',
-                  title: 'No!',
-                  payload: 'no',
-                },
+                { type: 'postback', title: 'Yes!', payload: 'yes' },
+                { type: 'postback', title: 'No!', payload: 'no' },
               ],
             },
           ],
@@ -123,15 +142,14 @@ async function handleMessage(senderPsid, receivedMessage) {
     };
   }
 
-  // Send the response message to Instagram via the API
   callSendAPI(senderPsid, response);
 }
 
-// Function to interact with Hugging Face API and get a response
+// Function: Get Hugging Face Response
 async function getHuggingFaceResponse(userMessage) {
   try {
     const response = await hf.textGeneration({
-      model: 'gpt2', // Use 'distilgpt2' for a lighter model
+      model: 'gpt2',
       inputs: userMessage,
       parameters: { max_new_tokens: 100, temperature: 0.7 },
     });
@@ -142,40 +160,27 @@ async function getHuggingFaceResponse(userMessage) {
     return { text: generatedText };
   } catch (error) {
     console.error('Error fetching Hugging Face response:', error);
-    return { text: 'Sorry, I could not process your request at the moment. Please try again later.' };
+    return { text: 'Sorry, I could not process your request at the moment.' };
   }
 }
 
-// Handles postback events
+// Function: Handle Postback
 function handlePostback(senderPsid, receivedPostback) {
-  let response;
-
-  // Get the payload for the postback
   let payload = receivedPostback.payload;
+  let response = payload === 'yes' ? { text: 'Thanks!' } : { text: 'Oops, try again.' };
 
-  if (payload === 'yes') {
-    response = { text: 'Thanks!' };
-  } else if (payload === 'no') {
-    response = { text: 'Oops, try sending another image.' };
-  }
-
-  // Send the postback response
   callSendAPI(senderPsid, response);
 }
 
-// Sends the response to Instagram via the Send API
+// Function: Send Response via API
 function callSendAPI(senderPsid, response) {
   const PAGE_ACCESS_TOKEN = process.env.PAGE_ACCESS_TOKEN;
 
-  // Construct the message body
-  let requestBody = {
-    recipient: {
-      id: senderPsid,
-    },
+  const requestBody = {
+    recipient: { id: senderPsid },
     message: response,
   };
 
-  // Send the request to Instagram's Send API
   request(
     {
       uri: 'https://graph.facebook.com/v12.0/me/messages',
@@ -183,17 +188,14 @@ function callSendAPI(senderPsid, response) {
       method: 'POST',
       json: requestBody,
     },
-    (err, _res, _body) => {
-      if (!err) {
-        console.log('Message sent!');
-      } else {
-        console.error('Unable to send message:', err);
-      }
+    (err) => {
+      if (!err) console.log('Message sent!');
+      else console.error('Unable to send message:', err);
     }
   );
 }
 
-// Set the default port and start the server
+// Start Server
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
